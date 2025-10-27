@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plumber Practice – Random 25</title>
+<style>
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; max-width: 960px; margin: 0 auto; padding: 16px; }
+  h1 { margin: 6px 0 12px; }
+  .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .card { border:1px solid #e6e6e6; border-radius:12px; padding:14px; margin:10px 0; box-shadow:0 1px 4px rgba(0,0,0,.05); }
+  .stem { font-weight:600; margin-bottom:6px; }
+  .reference { font-size:.92rem; color:#444; margin:2px 0 8px; }
+  .options label { display:block; margin:4px 0; }
+  button { padding:8px 12px; border:1px solid #ccc; border-radius:10px; background:#fff; cursor:pointer; }
+  .feedback { margin-top:6px; }
+  .correct { color: #0b6b00; }
+  .wrong { color: #a31515; }
+  .review { width:100%; border-collapse:collapse; margin-top:14px; }
+  .review th,.review td { border:1px solid #ddd; padding:8px; text-align:left; vertical-align:top; }
+</style>
+</head>
+<body>
+<h1>Plumber Practice – Random 25</h1>
+<div class="toolbar">
+  <label><input type="radio" name="mode" value="instant" checked> Check after each question</label>
+  <label><input type="radio" name="mode" value="final"> Check at the end</label>
+  <button id="newset">New Random Set</button>
+</div>
+
+<div id="quiz">Loading questions…</div>
+<div id="results"></div>
+
+<script>
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeN5T1ctkrJVQSUQanuC7HWOGueVQ2j3NA5km6B67TDktO_lYEOGB06xUPMps5SRI33kc47rT-7tSn/pubhtml?gid=396684713&single=true";
+
+let MODE = 'instant';
+document.getElementById('newset').onclick = () => location.reload();
+document.querySelectorAll('input[name="mode"]').forEach(r => {
+  r.addEventListener('change', () => {
+    MODE = document.querySelector('input[name="mode"]:checked').value;
+    if (window.__QUESTIONS__) render(window.__QUESTIONS__);
+  });
+});
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+
+function csvToRows(text){
+  const lines = text.split(/\r?\n/).filter(x=>x.trim().length);
+  return lines.map(line=>{
+    const out=[]; let cur="", inQ=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i], n=line[i+1];
+      if(c === '"' && inQ && n === '"'){ cur += '"'; i++; continue; }
+      if(c === '"'){ inQ = !inQ; continue; }
+      if(c === ',' && !inQ){ out.push(cur); cur=""; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  });
+}
+
+function normalizeHeader(h){ return h.toLowerCase().replace(/\s+/g,'_'); }
+function pick25(list){ return shuffle(list.slice()).slice(0, Math.min(25, list.length)); }
+
+function parseQuestions(rows){
+  const header = rows[0].map(normalizeHeader);
+  const ix = {};
+  ['number_in_pdf','stem','option_a','option_b','option_c','option_d','correct','reference'].forEach(k=>{
+    ix[k] = header.indexOf(k);
+  });
+  const missing = Object.entries(ix).filter(([k,v])=>v===-1).map(([k])=>k);
+  if(missing.length){ throw new Error("Missing columns: " + missing.join(", ")); }
+
+  const qs = [];
+  for(let r=1;r<rows.length;r++){
+    const row = rows[r];
+    const stem = row[ix.stem] || "";
+    const correct = (row[ix.correct]||"").toUpperCase().trim().replace(/[^A-D]/g,'');
+    if(!stem || !['A','B','C','D'].includes(correct)) continue;
+    const base = [
+      {text: row[ix.option_a], isCorrect: correct==='A'},
+      {text: row[ix.option_b], isCorrect: correct==='B'},
+      {text: row[ix.option_c], isCorrect: correct==='C'},
+      {text: row[ix.option_d], isCorrect: correct==='D'},
+    ].filter(x => (x.text||"").trim().length);
+    qs.push({
+      number: row[ix.number_in_pdf],
+      stem,
+      reference: row[ix.reference],
+      choices: shuffle(base)
+    });
+  }
+  if(qs.length === 0) throw new Error("No valid questions parsed. Check headers and 'correct' letters.");
+  return qs;
+}
+
+function render(qs){
+  window.__QUESTIONS__ = qs;
+  const root = document.getElementById('quiz');
+  root.innerHTML = '';
+
+  qs.forEach((q,i)=>{
+    const card = document.createElement('div');
+    card.className='card';
+
+    const stem = document.createElement('div');
+    stem.className='stem';
+    stem.textContent = `Q${i+1}. ${q.stem}`;
+    card.appendChild(stem);
+
+    const ref = document.createElement('div');
+    ref.className='reference';
+    ref.textContent = q.reference ? `Reference: ${q.reference}` : 'Reference: —';
+    card.appendChild(ref);
+
+    const opts = document.createElement('div');
+    opts.className='options';
+    q.choices.forEach((ch)=>{
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type='radio';
+      input.name='q_'+i;
+      input.value = ch.isCorrect ? '1' : '0';
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(' ' + ch.text));
+      if(MODE==='instant'){
+        input.addEventListener('change', ()=>{
+          const fb = card.querySelector('.feedback');
+          fb.textContent = ch.isCorrect ? '✅ Correct' : '❌ Incorrect';
+          fb.className = 'feedback ' + (ch.isCorrect ? 'correct' : 'wrong');
+        });
+      }
+      opts.appendChild(label);
+    });
+    card.appendChild(opts);
+
+    const fb = document.createElement('div');
+    fb.className='feedback';
+    card.appendChild(fb);
+
+    root.appendChild(card);
+  });
+
+  if(MODE==='final'){
+    const submit=document.createElement('button');
+    submit.textContent='Submit for Score';
+    submit.onclick=()=>grade(qs);
+    root.appendChild(submit);
+  }
+}
+
+function grade(qs){
+  let correct=0;
+  const cards = Array.from(document.querySelectorAll('.card'));
+  const review=[];
+  qs.forEach((q,i)=>{
+    const sel = cards[i].querySelector('input[name="q_'+i+'"]:checked');
+    const isRight = sel && sel.value==='1';
+    if(isRight) correct++;
+    const rightText = (q.choices.find(c=>c.isCorrect)||{}).text || '—';
+    const pickedText = sel ? sel.parentElement.textContent.trim() : '—';
+    const fb = cards[i].querySelector('.feedback');
+    fb.textContent = isRight ? '✅ Correct' : '❌ Incorrect. Correct: ' + rightText;
+    fb.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+    review.push({n:i+1, stem:q.stem, selected:pickedText, correct:rightText, reference:q.reference||'—', ok:isRight});
+  });
+  const pct = Math.round(correct/qs.length*100);
+  const out = document.getElementById('results');
+  out.innerHTML = `<h2>Score: ${correct}/${qs.length} (${pct}%)</h2>`;
+  const tbl=document.createElement('table'); tbl.className='review';
+  tbl.innerHTML = `<tr><th>#</th><th>Question</th><th>Your Answer</th><th>Correct</th><th>Reference</th></tr>`;
+  review.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${r.n}</td><td>${r.stem}</td><td>${r.selected} ${r.ok?'✅':'❌'}</td><td>${r.correct}</td><td>${r.reference}</td>`;
+    tbl.appendChild(tr);
+  });
+  out.appendChild(tbl);
+  window.scrollTo(0,0);
+}
+
+fetch(CSV_URL)
+  .then(r=>{ if(!r.ok) throw new Error('Failed to fetch CSV. Is the sheet published (File → Share → Publish to web)?'); return r.text(); })
+  .then(text=>csvToRows(text))
+  .then(rows=>parseQuestions(rows))
+  .then(qs=>render(pick25(qs)))
+  .catch(err=>{
+    document.getElementById('quiz').innerHTML =
+      '<pre style="white-space:pre-wrap;font-family:ui-monospace">ERROR:\n'+String(err)+'</pre>';
+  });
+</script>
+</body>
+</html>
